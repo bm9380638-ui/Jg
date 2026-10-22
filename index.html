@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Corrida Infinita</title>
+
+<style>
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #101522;
+  color: white;
+  font-family: Arial, sans-serif;
+  text-align: center;
+  overflow: hidden;
+  touch-action: none;
+}
+
+header {
+  padding: 10px;
+  background: #1b2436;
+}
+
+h1 {
+  margin: 5px;
+  color: #ffd43b;
+}
+
+#info {
+  display: flex;
+  justify-content: space-around;
+  gap: 8px;
+  padding: 10px;
+  font-weight: bold;
+  flex-wrap: wrap;
+}
+
+#game {
+  display: block;
+  width: 100%;
+  height: min(65vh, 600px);
+  background: #29384a;
+}
+
+#controls {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px;
+}
+
+button {
+  padding: 13px 20px;
+  border: none;
+  border-radius: 12px;
+  background: #ffc928;
+  color: #171717;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+#message {
+  padding: 5px;
+  font-weight: bold;
+}
+
+small {
+  color: #c5cede;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>🏃 CORRIDA INFINITA</h1>
+  <small>Desvie dos obstáculos e colete moedas!</small>
+</header>
+
+<div id="info">
+  <span>🪙 Moedas: <b id="coins">0</b>/250</span>
+  <span>⭐ Pontos: <b id="score">0</b></span>
+  <span>⚡ Velocidade: <b id="speed">1</b>x</span>
+</div>
+
+<canvas id="game"></canvas>
+
+<div id="message">Use ← → para mudar de faixa e espaço para pular.</div>
+
+<div id="controls">
+  <button id="left">⬅️ Esquerda</button>
+  <button id="jump">⬆️ Pular</button>
+  <button id="right">Direita ➡️</button>
+</div>
+
+<div style="padding-bottom:10px">
+  <button id="start">COMEÇAR / REINICIAR</button>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  const coinDisplay = document.getElementById("coins");
+  const scoreDisplay = document.getElementById("score");
+  const speedDisplay = document.getElementById("speed");
+  const message = document.getElementById("message");
+
+  const GOAL = 250;
+
+  let W = 0;
+  let H = 0;
+  let running = false;
+  let coins = 0;
+  let score = 0;
+  let speed = 1;
+  let distance = 0;
+  let lastTime = 0;
+  let spawnTimer = 0;
+  let coinTimer = 0;
+  let objects = [];
+  let particles = [];
+  let laneLines = 0;
+
+  const player = {
+    lane: 1,
+    x: 0,
+    jump: 0,
+    jumpVelocity: 0,
+    sliding: 0
+  };
+
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    W = rect.width;
+    H = rect.height;
+
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  window.addEventListener("resize", resize);
+  resize();
+
+  function laneX(lane) {
+    return W * (0.2 + lane * 0.3);
+  }
+
+  function groundY() {
+    return H * 0.79;
+  }
+
+  function reset() {
+    coins = 0;
+    score = 0;
+    speed = 1;
+    distance = 0;
+    spawnTimer = 0;
+    coinTimer = 0;
+    objects = [];
+    particles = [];
+    laneLines = 0;
+
+    player.lane = 1;
+    player.x = laneX(1);
+    player.jump = 0;
+    player.jumpVelocity = 0;
+    player.sliding = 0;
+
+    running = true;
+    lastTime = performance.now();
+
+    message.textContent = "Boa sorte! Colete moedas e evite os obstáculos.";
+    updateUI();
+  }
+
+  function updateUI() {
+    coinDisplay.textContent = coins;
+    scoreDisplay.textContent = Math.floor(score);
+    speedDisplay.textContent = speed.toFixed(1);
+  }
+
+  function moveLane(amount) {
+    if (!running) return;
+    player.lane = Math.max(0, Math.min(2, player.lane + amount));
+  }
+
+  function jump() {
+    if (!running) return;
+
+    if (player.jump === 0) {
+      player.jumpVelocity = 620;
+      player.jump = 1;
+    }
+  }
+
+  function slide() {
+    if (running && player.jump === 0) {
+      player.sliding = 0.55;
+    }
+  }
+
+  document.getElementById("left").addEventListener("pointerdown",
+    () => moveLane(-1));
+
+  document.getElementById("right").addEventListener("pointerdown",
+    () => moveLane(1));
+
+  document.getElementById("jump").addEventListener("pointerdown", jump);
+
+  document.getElementById("start").addEventListener("click", reset);
+
+  window.addEventListener("keydown", e => {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].includes(e.key)) {
+      e.preventDefault();
+    }
+
+    if (e.repeat) return;
+
+    if (e.key === "ArrowLeft" || e.key.toLowerCase() === "a") {
+      moveLane(-1);
+    }
+
+    if (e.key === "ArrowRight" || e.key.toLowerCase() === "d") {
+      moveLane(1);
+    }
+
+    if (e.key === "ArrowUp" || e.key === " ") {
+      jump();
+    }
+
+    if (e.key === "ArrowDown" || e.key.toLowerCase() === "s") {
+      slide();
+    }
+
+    if (!running && e.key === "Enter") {
+      reset();
+    }
+  });
+
+  let touchStartX = 0;
+  let touchStartY = 0;
+
+  canvas.addEventListener("pointerdown", e => {
+    touchStartX = e.clientX;
+    touchStartY = e.clientY;
+  });
+
+  canvas.addEventListener("pointerup", e => {
+    const dx = e.clientX - touchStartX;
+    const dy = e.clientY - touchStartY;
+
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 25) {
+      moveLane(dx > 0 ? 1 : -1);
+    } else if (dy < -25) {
+      jump();
+    } else if (dy > 25) {
+      slide();
+    }
+  });
+
+  function spawnObstacle() {
+    const lane = Math.floor(Math.random() * 3);
+    const type = Math.random() < 0.5 ? "crate" : "barrier";
+
+    objects.push({
+      type,
+      lane,
+      y: -60,
+      checked: false
+    });
+  }
+
+  function spawnCoin() {
+    const lane = Math.floor(Math.random() * 3);
+
+    objects.push({
+      type: "coin",
+      lane,
+      y: -30,
+      checked: false
+    });
+  }
+
+  function drawTrack() {
+    ctx.fillStyle = "#243448";
+    ctx.fillRect(0, 0, W, H);
+
+    // Paisagem
+    ctx.fillStyle = "#344b43";
+    ctx.fillRect(0, 0, W * 0.12, H);
+    ctx.fillRect(W * 0.88, 0, W * 0.12, H);
+
+    // Trilhos
+    ctx.fillStyle = "#4b505a";
+    ctx.fillRect(W * 0.1, 0, W * 0.8, H);
+
+    ctx.strokeStyle = "#d1d6de";
+    ctx.lineWidth = 3;
+
+    for (let lane = 0; lane < 3; lane++) {
+      const x = laneX(lane);
+      ctx.beginPath();
+      ctx.moveTo(x - W * 0.13, 0);
+      ctx.lineTo(x - W * 0.13, H);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(x + W * 0.13, 0);
+      ctx.lineTo(x + W * 0.13, H);
+      ctx.stroke();
+    }
+
+    // Travessas animadas
+    ctx.fillStyle = "#827b70";
+
+    for (let y = -40; y < H; y += 42) {
+      const yy = (y + laneLines) % (H + 42);
+
+      ctx.fillRect(W * 0.1, yy, W * 0.8, 5);
+    }
+  }
+
+  function drawPlayer() {
+    const targetX = laneX(player.lane);
+    player.x += (targetX - player.x) * 0.2;
+
+    const y = groundY() - player.jump;
+
+    // Sombra
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.beginPath();
+    ctx.ellipse(player.x, groundY() + 5, 22, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.save();
+
+    if (player.sliding > 0) {
+      ctx.fillStyle = "#43d9ff";
+      ctx.fillRect(player.x - 22, y - 35, 44, 25);
+    } else {
+      // Corpo
+      ctx.fillStyle = "#43d9ff";
+      ctx.fillRect(player.x - 17, y - 52, 34, 42);
+
+      // Cabeça
+      ctx.fillStyle = "#ffca91";
+      ctx.beginPath();
+      ctx.arc(player.x, y - 65, 14, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Cabelo
+      ctx.fillStyle = "#53372a";
+      ctx.fillRect(player.x - 13, y - 79, 26, 7);
+
+      // Pernas
+      ctx.fillStyle = "#f4f4f4";
+      ctx.fillRect(player.x - 14, y - 10, 11, 18);
+      ctx.fillRect(player.x + 3, y - 10, 11, 18);
+
+      // Tênis
+      ctx.fillStyle = "#ffcf32";
+      ctx.fillRect(player.x - 17, y + 5, 15, 6);
+      ctx.fillRect(player.x + 2, y + 5, 15, 6);
+    }
+
+    ctx.restore();
+  }
+
+  function drawObject(o) {
+    const x = laneX(o.lane);
+    const y = o.y;
+    const scale = 0.65 + (y / H) * 0.65;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+
+    if (o.type === "coin") {
+      ctx.fillStyle = "#ffca28";
+      ctx.beginPath();
+      ctx.arc(0, 0, 13, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = "#fff0a0";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      ctx.fillStyle = "#9a6500";
+      ctx.font = "bold 16px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("$", 0, 1);
+    }
+
+    if (o.type === "crate") {
+      ctx.fillStyle = "#a96532";
+      ctx.fillRect(-23, -26, 46, 48);
+
+      ctx.strokeStyle = "#e7b17d";
+      ctx.lineWidth = 5;
+      ctx.strokeRect(-20, -23, 40, 42);
+
+      ctx.beginPath();
+      ctx.moveTo(-18, -20);
+      ctx.lineTo(18, 18);
+      ctx.moveTo(18, -20);
+      ctx.lineTo(-18, 18);
+      ctx.stroke();
+    }
+
+    if (o.type === "barrier") {
+      ctx.fillStyle = "#f04438";
+      ctx.fillRect(-30, -17, 60, 24);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(-18, -17, 10, 24);
+      ctx.fillRect(8, -17, 10, 24);
+
+      ctx.fillStyle = "#4a4a4a";
+      ctx.fillRect(-25, 7, 8, 17);
+      ctx.fillRect(17, 7, 8, 17);
+    }
+
+    ctx.restore();
+  }
+
+  function finish(won) {
+    running = false;
+
+    message.textContent = won
+      ? "🏆 Meta de 250 moedas virtuais alcançada! Parabéns!"
+      : "Fim de jogo! Clique em COMEÇAR / REINICIAR para tentar novamente.";
+
+    if (won) {
+      ctx.fillStyle = "rgba(0,0,0,0.65)";
+      ctx.fillRect(0, H * 0.32, W, H * 0.3);
+
+      ctx.fillStyle = "#ffdf45";
+      ctx.font = "bold 25px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("META ALCANÇADA!", W / 2, H * 0.44);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "18px Arial";
+      ctx.fillText("250 moedas virtuais!", W / 2, H * 0.52);
+    }
+  }
+
+  function update(dt) {
+    if (!running) return;
+
+    // A velocidade cresce conforme a meta se aproxima.
+    const progress = Math.min(coins / GOAL, 1);
+
+    speed = 1 + progress * progress * 3.5;
+
+    distance += dt * 60 * speed;
+    score += dt * 10 * speed;
+
+    laneLines = (laneLines + dt * 260 * speed) % 42;
+
+    if (player.jump > 0) {
+      player.jump += player.jumpVelocity * dt;
+      player.jumpVelocity -= 1550 * dt;
+
+      if (player.jump <= 0) {
+        player.jump = 0;
+        player.jumpVelocity = 0;
+      }
+    }
+
+    if (player.sliding > 0) {
+      player.sliding -= dt;
+    }
+
+    spawnTimer -= dt;
+    coinTimer -= dt;
+
+    if (spawnTimer <= 0) {
+      spawnObstacle();
+      spawnTimer = Math.max(0.48, 1.15 - progress * 0.4)
+        + Math.random() * 0.3;
+    }
+
+    if (coinTimer <= 0) {
+      spawnCoin();
+      coinTimer = 0.48 + Math.random() * 0.5;
+    }
+
+    const playerY = groundY() - player.jump;
+
+    for (const o of objects) {
+      o.y += dt * 260 * speed;
+
+      const closeX = Math.abs(laneX(o.lane) - player.x) < 35;
+      const closeY = Math.abs(o.y - playerY) < 32;
+
+      if (o.type === "coin" && !o.checked && closeX && closeY) {
+        o.checked = true;
+        coins++;
+        score += 25;
+
+        if (coins >= GOAL) {
+          coins = GOAL;
+          updateUI();
+          finish(true);
+          return;
+        }
+      }
+
+      if (o.type !== "coin" && !o.checked && closeX && closeY) {
+        const jumpingOver = player.jump > 42;
+        const slidingUnder =
+          o.type === "barrier" && player.sliding > 0;
+
+        if (!jumpingOver && !slidingUnder) {
+          o.checked = true;
+          finish(false);
+          return;
+        }
+      }
+    }
+
+    objects = objects.filter(o => o.y < H + 80);
+
+    updateUI();
+  }
+
+  function draw() {
+    drawTrack();
+
+    for (const o of objects) {
+      drawObject(o);
+    }
+
+    drawPlayer();
+
+    if (!running && coins === 0 && score === 0) {
+      ctx.fillStyle = "rgba(0,0,0,0.4)";
+      ctx.fillRect(0, H * 0.35, W, H * 0.25);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 24px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("PRONTO PARA CORRER?", W / 2, H * 0.45);
+
+      ctx.font = "16px Arial";
+      ctx.fillText("Toque em COMEÇAR!", W / 2, H * 0.52);
+    }
+  }
+
+  function loop(now) {
+    const dt = Math.min((now - lastTime) / 1000 || 0, 0.04);
+    lastTime = now;
+
+    update(dt);
+    draw();
+
+    requestAnimationFrame(loop);
+  }
+
+  player.x = laneX(1);
+
+  updateUI();
+  requestAnimationFrame(loop);
+})();
+</script>
+
+</body>
+</html>
